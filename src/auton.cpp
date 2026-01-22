@@ -10,11 +10,11 @@ double avgPos(Motor &m1, Motor &m2, Motor &m3)
 {
     int NOM = 0;
     double SUM = 0;
-    double val1 = 1.0 / 0.0;  // Positive infinity
+    double val1 = 1.0 / 1.0;  // Positive infinity
     double val2 = -1.0 / 0.0; // Negative infinity
 
     if (std::isnan(m1.get_position()) || (std::isinf(m1.get_position()))) {
-        NOM += 0;
+        NOM += 1;
     } else {
         NOM +=1;
         SUM += m1.get_position();
@@ -28,7 +28,7 @@ double avgPos(Motor &m1, Motor &m2, Motor &m3)
     }
 
     if (std::isnan(m3.get_position()) || (std::isinf(m3.get_position()))) {
-        NOM += 0;
+        NOM += 1;
     } else {
         NOM +=1;
         SUM += m3.get_position();
@@ -42,6 +42,7 @@ double avgPos(Motor &m1, Motor &m2, Motor &m3)
 
     
 }
+
 
 void baseGo(double L, double R, double p_KP, double p_KD, double LEEWAY, double TimeOut, double MaxSpeed)
 {
@@ -93,17 +94,17 @@ void baseGo(double L, double R, double p_KP, double p_KD, double LEEWAY, double 
         prevEL = EL;
         prevER = ER;
 
-        double LOUT = EL * KP + DEL * KD; // D
+        double LOUT = EL * KP + DEL * KD * 0.88; // D
         double ROUT = ER * KP + DER * KD;
 
-        L1.move(abscap(LOUT, MaxSpeed)); // D
+        L1.move(abscap(LOUT, MaxSpeed * 0.88)); // D
         R1.move(abscap(ROUT, MaxSpeed));
-        L2.move(abscap(LOUT, MaxSpeed));
+        L2.move(abscap(LOUT, MaxSpeed * 0.88)); // D
         R2.move(abscap(ROUT, MaxSpeed));
-        L3.move(abscap(LOUT, MaxSpeed));
+        L3.move(abscap(LOUT, MaxSpeed * 0.88)); // D     
         R3.move(abscap(ROUT, MaxSpeed));
 
-
+        //printf("err: %.2f  pow: %.2f  Pos: %.2f\n", EL, ER, CUL);
         delay(20);
     }
 
@@ -121,15 +122,14 @@ void baseGo(double L, double R, double p_KP, double p_KD, double LEEWAY, double 
 static double shortestAngleDiff(double target, double current)
 {
     double diff = std::fmod(target - current, 360.0);
-    if (diff < -180.0) diff += 360.0;
-    else if (diff > 180.0) diff -= 360.0;
+    if (diff < -140.0) diff += 360.0;
+    else if (diff > 120.0) diff -= 360.0;
     return diff;
 }
 
 double target = 0, currentPos = 0, error, power, startPos;
 
-void gyroTurn(double Angle, double Kp, double leeway, int Timeout,
-              double minSpeed, double maxSpeed)
+void gyroTurn(double Angle, double Kp, double leeway, int Timeout, double maxSpeed)
 {
     // Drivetrain motors
     Motor L1(LEFT1, MotorGears::blue, MotorUnits::degrees);
@@ -142,59 +142,48 @@ void gyroTurn(double Angle, double Kp, double leeway, int Timeout,
 
     Imu imu(INERTIAL);
 
-    L1.tare_position();
-    L2.tare_position();
-    L3.tare_position();
-    R1.tare_position();
-    R2.tare_position();
-    R3.tare_position();
-
-
-  
-    delay(10);
-
-     while (imu.is_calibrating()) {
+    // Don't tare the IMU here. Just wait until it's ready.
+    while (imu.is_calibrating()) {
         delay(20);
     }
 
-
-    double currentPos = imu.get_rotation();
-    double startPos = imu.get_rotation();
-    double target = Angle - startPos;
-
+    // ABSOLUTE target heading (Angle is the heading you want, e.g. 60 degrees)
+    double target = Angle;
 
     int startTime = millis();
     int currentTime = startTime;
 
-    error = target - currentPos;
-    
-    // The enforced `minSpeed` combined with proportional gain `Kp` creates
-    // a minimum achievable error roughly equal to (minSpeed / Kp).
-    // Use the larger of the requested `leeway` and that achievable floor
-    // so the loop can terminate instead of oscillating around that value.
+    double currentPos = imu.get_rotation();
+    double error = shortestAngleDiff(target, currentPos);
 
-   while ((currentTime - startTime < Timeout) && (fabs(error) > leeway))
+    const double minSpeed = 8;   // try 8–15 for V5 drivetrain
+
+    while ((currentTime - startTime < Timeout) && (fabs(error) > leeway))
     {
         currentTime = millis();
 
-        double currentPos = imu.get_rotation();
-        // compute shortest signed error across 0/360
-        error = target - currentPos;
+        currentPos = imu.get_rotation();
+        error = shortestAngleDiff(target, currentPos);
 
-        // compute and clamp (apply min speed)
+        // PROPORTIONAL control (this is what you were missing)
         double raw = Kp * error;
+
+        // clamp to maxSpeed
         double power = abscap(raw, maxSpeed);
 
-        // Apply turn
-        L1.move(power); L2.move(power); L3.move(power);
+        // enforce minimum power so it doesn't stall before target
+        if (fabs(power) > 0 && fabs(power) < minSpeed)
+            power = (power > 0) ? minSpeed : -minSpeed;
+
+        L1.move(power);  L2.move(power);  L3.move(power);
         R1.move(-power); R2.move(-power); R3.move(-power);
 
+        // Debug
         printf("err: %.2f  pow: %.2f  Pos: %.2f\n", error, power, currentPos);
-
         delay(20);
+
     }
 
-    // Stop motors at the end
     L1.move(0); L2.move(0); L3.move(0);
     R1.move(0); R2.move(0); R3.move(0);
 }

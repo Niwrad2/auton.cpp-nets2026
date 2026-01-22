@@ -4,8 +4,42 @@
 bool MechDown = false;
 
 // add constants for deadband/tolerance
-constexpr double MECH_MIN_OUTPUT = 16.0;           // minimum applied motor output to overcome deadband
-constexpr double MECH_POSITION_TOLERANCE = 2.0;    // degrees: consider "on target" when error within this
+double avgtemp(Motor &m1, Motor &m2, Motor &m3)
+{
+    int NOMs = 0;
+    double SUMs = 0;
+    double val1s = 1.0 / 1.0;  // Positive infinity
+    double val2s = -1.0 / 0.0; // Negative infinity
+
+    if (std::isnan(m1.get_temperature()) || (std::isinf(m1.get_temperature()))) {
+        NOMs += 1;
+    } else {
+        NOMs +=1;
+        SUMs += m1.get_temperature();
+    }
+
+    if (std::isnan(m2.get_temperature()) || (std::isinf(m2.get_temperature()))) {
+        NOMs += 0;
+    } else {
+        NOMs +=1;
+        SUMs += m2.get_temperature();
+    }
+
+    if (std::isnan(m3.get_temperature()) || (std::isinf(m3.get_temperature()))) {
+        NOMs += 1;
+    } else {
+        NOMs +=1;
+        SUMs += m3.get_temperature();
+    }
+
+    if (NOMs == 0) {
+        return 0.0; 
+    }
+
+    return SUMs / NOMs;
+
+    
+}
 
 void Mech_Task(void *param)
 
@@ -14,34 +48,36 @@ void Mech_Task(void *param)
 	Controller master(E_CONTROLLER_MASTER);
 	double error;
 
+	int counter_thingy = 0;
 	while (true)
 
 	{
 		if (MechDown)
 		{
+			counter_thingy += 1;
 			error = MECH_ACTIVE_POSITION - Mech.get_position();
+			Mech.move(error * MECH_KP);
 		}
 		else
 		{
+			if (counter_thingy == 1) {
+				error = 2220 - Mech.get_position();
+				Mech.move(error * MECH_KP);
+			} else if (counter_thingy >= 2) {
 			error = MECH_REST_POSITION - Mech.get_position();
+			Mech.move(error * MECH_KP);
+			}	
 		}
+
 
 		// replace direct move with deadband/tolerance-aware output
-		double output = error * MECH_KP;
 
-		if (std::fabs(output) < MECH_MIN_OUTPUT) {
-			if (std::fabs(error) <= MECH_POSITION_TOLERANCE) {
-				output = 0.0; // close enough: stop moving
-			} else {
-				// keep enough power to overcome static friction
-				output = (output > 0.0) ? MECH_MIN_OUTPUT : -MECH_MIN_OUTPUT;
-			}
+
 		}
 
-		Mech.move(output);
-		delay(20);
+
 	}
-}
+
 
 
 void jerk(double forward_time, double Fstrength, double backward_time, double Bstrength, int times)
@@ -67,9 +103,35 @@ void jerk(double forward_time, double Fstrength, double backward_time, double Bs
 	}
 }
 
-void health(void* ignore) {
-	
-}
+void health(double time, double direction, double power) {
+
+	Motor L1(LEFT1);
+	Motor L2(LEFT2);
+	Motor L3(LEFT3);
+
+	Motor R1(RIGHT1);
+	Motor R2(RIGHT2);
+	Motor R3(RIGHT3);
+
+	Motor Mech(LITTLE_WILL_MECH);
+	Motor Conveyer(CONVEYER);
+	Motor Rollers(ROLLERS);
+
+	L1.move(direction * power * 0.88);
+	L2.move(direction * power * 0.88);
+	L3.move(direction * power * 0.88);
+	R1.move(direction * power);
+	R2.move(direction * power);
+	R3.move(direction * power);
+	delay(time);
+	L1.move(0);
+	L2.move(0);
+	L3.move(0);
+	R1.move(0);
+	R2.move(0);
+	R3.move(0);
+
+	}
 
 void good (void* ignore) {
 
@@ -251,11 +313,15 @@ void opcontrol()
 		// }
 
 
+
+		master.print(2, 0, "%.2f", (avgtemp(L1, L2, L3)));
+		master.print(2, 14, "%.2f", (avgtemp(R1, R2, R3)));
 	}
 }
 
 
-void The_Very_Sigma_Autonomous(int Which_autonomous_do_you_want) {
+void The_Very_Sigma_Autonomous(int Which_autonomous_do_you_want) 
+{
 
 	if (Which_autonomous_do_you_want == 1) {
 		Motor L1(LEFT1);
@@ -283,17 +349,59 @@ void The_Very_Sigma_Autonomous(int Which_autonomous_do_you_want) {
 		Controller master(E_CONTROLLER_MASTER);
 
 	
-		//baseGo(20, 20, 0.1, 0, 5, 5000, 0, 80);
-		//gyroTurn(90, 3, 0.5, 5000, 0, 90);
-		//gyroTurn(180, 3.25, 0.5, 5000, 0, 90);
+		baseGo(46.5, 46.5, 0.3, 0, 5, 1500, 80); //take note of this distance
+		gyroTurn(-90, 3, 0.5, 1300, 90);
+		gyroTurn(-90, 3, 0.1, 1300, 90);
+
+		//reach loading
+		master.rumble("..");
+		MechDown = true;
+		delay(100);
 
 		Conveyer.move(127);
-		baseGo(40, 35, 0.5, 0, 10, 5000, 80);
-		MechDown = true;
-		gyroTurn(90, 3, 0.5, 5000, 90);
+		baseGo(11, 11, 0.3, 0, 5, 450, 90);
+		health(225, 1, 60);
+		//loader
+		delay(2500); //laoding time
+		//baseGo(-5, -4, 0.3, 0, 5, 700, 90);//tuneing shit
+		gyroTurn(-90, 3, 0.5, 1000, 90);
+		baseGo(-56, -59, 0.3, 0, 5, 900, 90);
+		health(300, -1, 127);
+		delay(150);
+		Conveyer.move(0);
+		MechDown = false;
+
+		Rollers.move(127);
+		Conveyer.move(127);
+		delay(3000);
+		Rollers.move(0);
+		Conveyer.move(0);
+		
+
+
+		baseGo(10, 10, 0.3, 0, 5, 600, 90);
+		gyroTurn(-180, 3, 0.5, 3000, 90);
+		baseGo(-30, -30, 0.3, 0, 5, 1000, 80);
+		baseGo(5, 5, 0.3, 0, 5, 1000, 80);
+		gyroTurn(90, 3, 0.5, 1500, 90);
+		gyroTurn(90, 3, 0.1, 1200, 90);
+		//delay(200);
+		baseGo(15, 25, 0.3, 0, 5, 2000, 99);
+		baseGo(40, 45, 0.3, 0, 5, 2000, 99);
+		/*gyroTurn(-90, 3, 0.1, 1300, 90);
+		baseGo(-16, -16, 0.3, 0, 5, 2000, 99);
+		gyroTurn(45, 3, 0.5, 1300, 90);
+		gyroTurn(45, 3, 0.5, 1300, 90);
+		delay(150);
+		baseGo(14, 14, 0.3, 0, 5, 600, 80);    
+		gyroTurn(90, 3, 0.5, 1500, 90); 
+
+		baseGo(-24, -24, 0.3, 0, 5, 600, 80);
+		Conveyer.move(127);
+		health(800, -1, 127); */
 	
 
-
+	
 
 
 
@@ -302,10 +410,223 @@ void The_Very_Sigma_Autonomous(int Which_autonomous_do_you_want) {
 
 	}
 
-	else if (Which_autonomous_do_you_want == 2) {}
+	else if (Which_autonomous_do_you_want == 2) {
+		Motor L1(LEFT1);
+		Motor L2(LEFT2);
+		Motor L3(LEFT3);
 
+		Motor R1(RIGHT1);
+		Motor R2(RIGHT2);
+		Motor R3(RIGHT3);
+
+		Motor Mech(LITTLE_WILL_MECH);
+		Motor Conveyer(CONVEYER);
+		Motor Rollers(ROLLERS);
+
+		Imu imu(INERTIAL);
+		Optical optical_sensor(OPTICAL);
+
+		L1.set_brake_mode(E_MOTOR_BRAKE_BRAKE);
+		L2.set_brake_mode(E_MOTOR_BRAKE_BRAKE);
+		L3.set_brake_mode(E_MOTOR_BRAKE_BRAKE);
+
+		R1.set_brake_mode(E_MOTOR_BRAKE_BRAKE);
+		R2.set_brake_mode(E_MOTOR_BRAKE_BRAKE);
+		R3.set_brake_mode(E_MOTOR_BRAKE_BRAKE);
+		Controller master(E_CONTROLLER_MASTER);
+
+	
+		baseGo(46.5, 46.5, 0.3, 0, 5, 1500, 80); //take note of this distance
+		gyroTurn(-90, 3, 0.5, 1300, 90);
+		gyroTurn(-90, 3, 0.1, 1300, 90);
+
+		//reach loading
+		master.rumble("..");
+		MechDown = true;
+		delay(100);
+
+		Conveyer.move(127);
+		baseGo(11, 11, 0.3, 0, 5, 450, 90);
+		health(225, 1, 60);
+		//loader
+		delay(2500); //laoding time
+		//baseGo(-5, -4, 0.3, 0, 5, 700, 90);//tuneing shit
+		gyroTurn(-90, 3, 0.5, 1000, 90);
+		baseGo(-56, -59, 0.3, 0, 5, 900, 90);
+		health(300, -1, 127);
+		delay(150);
+		Conveyer.move(0);
+		MechDown = false;
+
+		Rollers.move(127);
+		Conveyer.move(127);
+		delay(3000);
+		Rollers.move(0);
+		Conveyer.move(0);
+		
+
+
+		baseGo(10, 10, 0.3, 0, 5, 600, 90);
+		gyroTurn(-180, 3, 0.5, 3000, 90);
+		delay(200);
+		gyroTurn(-180, 3, 0.5, 3000, 90);
+		baseGo(-30, -30, 0.3, 0, 5, 3000, 50);
+		baseGo(63.5, 63.5, 0.3, 0, 5, 3000, 80);
+		gyroTurn(-90, 3, 0.5, 1000, 90);
+		delay(100);
+		gyroTurn(-90, 3, 0.1, 2000, 90);
+		delay(100);
+		gyroTurn(-90, 3, 0.1, 2000, 90);
+		Conveyer.move(127);
+		health(800, 1, 127);
+
+
+		
+		/*gyroTurn(-90, 3, 0.1, 1300, 90);
+		baseGo(-16, -16, 0.3, 0, 5, 2000, 99);
+		gyroTurn(45, 3, 0.5, 1300, 90);
+		gyroTurn(45, 3, 0.5, 1300, 90);
+		delay(150);
+		baseGo(14, 14, 0.3, 0, 5, 600, 80);    
+		gyroTurn(90, 3, 0.5, 1500, 90); 
+
+		baseGo(-24, -24, 0.3, 0, 5, 600, 80);
+		Conveyer.move(127);
+		health(800, -1, 127); */
+	
+	
+
+
+		
+
+	} 
+	else if (Which_autonomous_do_you_want == 3) {
+		Motor L1(LEFT1);
+		Motor L2(LEFT2);
+		Motor L3(LEFT3);
+
+		Motor R1(RIGHT1);
+		Motor R2(RIGHT2);
+		Motor R3(RIGHT3);
+
+		Motor Mech(LITTLE_WILL_MECH);
+		Motor Conveyer(CONVEYER);
+		Motor Rollers(ROLLERS);
+
+		Imu imu(INERTIAL);
+		Optical optical_sensor(OPTICAL);
+
+		L1.set_brake_mode(E_MOTOR_BRAKE_BRAKE);
+		L2.set_brake_mode(E_MOTOR_BRAKE_BRAKE);
+		L3.set_brake_mode(E_MOTOR_BRAKE_BRAKE);
+
+		R1.set_brake_mode(E_MOTOR_BRAKE_BRAKE);
+		R2.set_brake_mode(E_MOTOR_BRAKE_BRAKE);
+		R3.set_brake_mode(E_MOTOR_BRAKE_BRAKE);
+		Controller master(E_CONTROLLER_MASTER);
+
+	
+		//baseGo(20, 20, 0.1, 0, 5, 5000, 0, 80);
+		//gyroTurn(90, 3, 0.5, 5000, 0, 90);
+		//gyroTurn(90, 3.25, 0.5, 5000, 90);
+		baseGo(47, 47, 0.3, 0, 5, 1500, 80); //take note of this distance
+		gyroTurn(-90, 3, 0.5, 1300, 90);
+		gyroTurn(-90, 3, 0.1, 1300, 90);
+
+		//reach loading
+		master.rumble("..");
+		MechDown = true;
+		delay(100);
+
+		Conveyer.move(127);
+		baseGo(11, 11, 0.3, 0, 5, 450, 90);
+		health(175, 1, 50);
+		//loader
+		delay(2500); //laoding time
+		//baseGo(-5, -4, 0.3, 0, 5, 700, 90);//tuneing shit
+		gyroTurn(-90, 3, 0.5, 1000, 90);
+		baseGo(-56, -56, 0.3, 0, 5, 900, 90);
+		health(300, -1, 127);
+		delay(150);
+		Conveyer.move(0);
+		MechDown = false;
+		//reached long goal
+
+
+
+		baseGo(10, 10, 0.3, 0, 5, 600, 90);
+		gyroTurn(-45, 3, 0.5, 1000, 90);
+		baseGo(-22, -22, 0.3, 0, 5, 1000, 80);
+		gyroTurn(-90, 3, 0.5, 1500, 90);
+		gyroTurn(-90, 3, 0.1, 1200, 90);
+		//delay(200);
+		baseGo(-40, -40, 0.3, 0, 5, 2000, 99);
+		gyroTurn(-90, 3, 0.1, 1300, 90);
+		baseGo(-16, -16, 0.3, 0, 5, 2000, 99);
+		gyroTurn(45, 3, 0.5, 1300, 90);
+		gyroTurn(45, 3, 0.5, 1300, 90);
+		delay(150);
+		baseGo(14, 14, 0.3, 0, 5, 600, 80);    
+		gyroTurn(90, 3, 0.5, 1500, 90); 
+
+		baseGo(-24, -24, 0.3, 0, 5, 600, 80);
+		Conveyer.move(127);
+		health(800, -1, 127);
+
+		/*health(1800, -1, 127);
+		gyroTurn(90, 3, 2, 400, 90);
+		baseGo(6, 4, 0.3, 0, 5, 200, 80);
+		delay(20);
+		gyroTurn(90, 3, 0.5, 1000, 90);
+		delay(20); */
+		//health(300, -1, 127);
+		MechDown = true;
+		Rollers.move(127);
+		Conveyer.move(127);
+		delay(3000);
+		Rollers.move(0);
+
+
+
+		MechDown = true;
+		//finsih scoring
+
+
+		gyroTurn(90, 3, 0.5, 1500, 90);
+		baseGo(27, 27, 0.3, 0, 5, 700, 90);
+		health(200, 1, 70);
+		health(200, -1, 50);
+		health(340, 1, 50);
+
+		
+		delay(2000);
+
+
+		gyroTurn(90, 3, 0.5, 1500, 90);
+		baseGo(-56, -56, 0.3, 0, 5, 900, 90);
+		delay(500);
+
+		Rollers.move(127);
+		Conveyer.move(127);
+		delay(3000);
+
+		Conveyer.move(0);
+		Rollers.move(0);
+
+		baseGo(10, 10, 0.3, 0, 5, 600, 90);
+		gyroTurn(180, 3, 0.5, 1000, 90);
+		baseGo(115, 115, 0.3, 0, 5, 1500, 90);
+		gyroTurn(90, 3, 0.5, 1000, 90);
+		baseGo(-100, -120, 0.6, 0, 5, 1000, 90);
+		/*gyroTurn(45, 3, 0.5, 1000, 90);
+		baseGo(10, 10, 0.3, 0, 5, 2000, 80);
+		gyroTurn(90, 3, 0.5, 1000, 90); */
+
+	}
 }
-void autonomous() {
+
+void autonomous() 
+{
 	
 	Motor L1(LEFT1);
 	Motor L2(LEFT2);
@@ -330,12 +651,12 @@ void autonomous() {
 	R2.set_brake_mode(E_MOTOR_BRAKE_BRAKE);
 	R3.set_brake_mode(E_MOTOR_BRAKE_BRAKE);
 
-//1 = 
-//2 = 
-//3 = 
+//1 = skills uncomplete
+//2 = skills with park
+//3 = skills
 
 
-	The_Very_Sigma_Autonomous(1);
+	The_Very_Sigma_Autonomous(2);
 
 }
 
